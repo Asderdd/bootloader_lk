@@ -30,6 +30,7 @@
 #include <platform.h>
 #include <target.h>
 #include <lib/heap.h>
+#include <lib/bio.h>
 #include <kernel/thread.h>
 #include <kernel/timer.h>
 #include <kernel/dpc.h>
@@ -55,7 +56,7 @@ static void call_constructors(void)
 	while(ctor != &__ctor_end) {
 		void (*func)(void);
 
-		func = (void (*)())*ctor;
+		func = (void (*)(void))*ctor;
 
 		func();
 		ctor++;

@@ -97,15 +97,20 @@ static int parse_atag_core(const struct tag *tag)
 	return 0;
 }
 
+static void add_meminfo(uint32_t start, uint32_t size) {
+	meminfo = realloc(meminfo, (++meminfo_count)*sizeof(*meminfo));
+	ASSERT(meminfo);
+
+	meminfo[meminfo_count-1].start = start;
+	meminfo[meminfo_count-1].size = size;
+}
+
 static int parse_atag_mem32(const struct tag *tag)
 {
 	dprintf(INFO, "0x%08x-0x%08x\n", tag->u.mem.start, tag->u.mem.start+tag->u.mem.size);
 
-	meminfo = realloc(meminfo, (++meminfo_count)*sizeof(*meminfo));
-	ASSERT(meminfo);
+	add_meminfo(tag->u.mem.start, tag->u.mem.size);
 
-	meminfo[meminfo_count-1].start = tag->u.mem.start;
-	meminfo[meminfo_count-1].size = tag->u.mem.size;
 	return 0;
 }
 
@@ -142,12 +147,43 @@ static int parse_atag(const struct tag *tag)
 	return t < t_end;
 }
 
+static struct tagtable* get_tagtable_entry(const struct tag *tag)
+{
+	struct tagtable *t;
+	struct tagtable *t_end = tagtable+ARRAY_SIZE(tagtable);
+
+	for (t = tagtable; t < t_end; t++) {
+		if (tag->hdr.tag == t->tag) {
+			return t;
+		}
+	}
+
+	return NULL;
+}
+
 static void parse_atags(const struct tag *t)
 {
 	for (; t->hdr.size; t = tag_next(t))
 		if (!parse_atag(t))
 			dprintf(INFO, "Ignoring unrecognised tag 0x%08x\n",
 				t->hdr.tag);
+}
+
+void* lkargs_atag_insert_unknown(void* tags) {
+	struct tag *tag = (struct tag *)tags;
+	const struct tag *t;
+
+	if(!tags_copy)
+		return tags;
+
+	for (t=tags_copy; t->hdr.size; t=tag_next(t)) {
+		if (!get_tagtable_entry(t)) {
+			memcpy(tag, t, t->hdr.size*sizeof(uint32_t));
+			tag = tag_next(tag);
+		}
+	}
+
+	return tag;
 }
 
 static unsigned *target_mem_atag_create(unsigned *ptr, uint32_t size, uint32_t addr)
@@ -172,6 +208,18 @@ unsigned *lkargs_gen_meminfo_atags(unsigned *ptr)
 	}
 
 	return ptr;
+}
+
+void* lkargs_get_mmap_callback(void* pdata, platform_mmap_cb_t cb) {
+	uint32_t i;
+
+	ASSERT(meminfo);
+
+	for(i=0; i<meminfo_count; i++) {
+		pdata = cb(pdata, (paddr_t) meminfo[i].start, (size_t)meminfo[i].size, false);
+	}
+
+	return pdata;
 }
 
 bool lkargs_has_meminfo(void) {
@@ -500,6 +548,7 @@ static int parse_fdt(void* fdt)
 				uint32_t size = dt_mem_next_cell(&reg);
 
 				dprintf(INFO, "0x%08x-0x%08x\n", base, base+size);
+				add_meminfo(base, size);
 			}
 		}
 	}
@@ -568,6 +617,113 @@ out:
 }
 #endif
 
+#if DEVICE_TREE
+static int lkargs_fdt_insert_properties(void *fdtdst, int offsetdst, const void* fdtsrc, int offsetsrc)
+{
+	int len;
+	int offset;
+	int ret;
+
+	offset = offsetsrc;
+	for (offset = fdt_first_property_offset(fdtsrc, offset);
+			(offset >= 0);
+			(offset = fdt_next_property_offset(fdtsrc, offset)))
+	{
+		const struct fdt_property *prop;
+
+		if (!(prop = fdt_get_property_by_offset(fdtsrc, offset, &len))) {
+			offset = -FDT_ERR_INTERNAL;
+			break;
+		}
+
+		const char* name = fdt_string(fdtsrc, fdt32_to_cpu(prop->nameoff));
+		dprintf(SPEW, "PROP: %s\n", name);
+
+		// blacklist our nodes
+		if(!strcmp(name, "bootargs"))
+			continue;
+		if(!strcmp(name, "linux,initrd-start"))
+			continue;
+		if(!strcmp(name, "linux,initrd-end"))
+			continue;
+
+		// set prop
+		ret = fdt_setprop(fdtdst, offsetdst, name, prop->data, len);
+		if(ret) {
+			dprintf(CRITICAL, "can't set prop: %s\n", fdt_strerror(ret));
+			continue;
+		}
+	}
+
+	return 0;
+}
+
+static int lkargs_fdt_insert_nodes(void *fdt, int target_offset) {
+	int depth;
+	int ret = 0;
+	uint32_t source_offset_chosen;
+	uint32_t target_offset_node;
+	int offset;
+
+	// get chosen node in source
+	ret = fdt_path_offset(tags_copy, "/chosen");
+	if (ret < 0) {
+		dprintf(CRITICAL, "Could not find chosen node.\n");
+		return ret;
+	}
+	source_offset_chosen = ret;
+
+	offset = source_offset_chosen;
+	for (depth = 0; (offset >= 0) && (depth >= 0);
+			offset = fdt_next_node(tags_copy, offset, &depth))
+	{
+		const char *name = fdt_get_name(tags_copy, offset, NULL);
+		dprintf(SPEW, "NODE: %s\n", name);
+
+		// get/create node
+		if(!strcmp(name, "chosen")) {
+			ret = target_offset;
+		}
+		else {
+			ret = fdt_subnode_offset(fdt, target_offset, name);
+			if (ret < 0) {
+				dprintf(SPEW, "creating node %s.\n", name);
+				ret = fdt_add_subnode(fdt, target_offset, name);
+				if (ret < 0) {
+					dprintf(CRITICAL, "can't create node %s: %s\n", name, fdt_strerror(ret));
+					continue;
+				}
+			}
+		}
+		target_offset_node = ret;
+
+		// insert all properties
+		lkargs_fdt_insert_properties(fdt, target_offset_node, tags_copy, offset);
+	}
+
+	return 0;
+}
+
+int lkargs_insert_chosen(void* fdt) {
+	int ret = 0;
+	uint32_t target_offset_chosen;
+
+	if(!tags_copy)
+		return 0;
+
+	// get chosen node
+	ret = fdt_path_offset(fdt, "/chosen");
+	if (ret < 0) {
+		dprintf(CRITICAL, "Could not find chosen node.\n");
+		return ret;
+	}
+	target_offset_chosen = ret;
+
+	// insert all nodes
+	return lkargs_fdt_insert_nodes(fdt, target_offset_chosen);
+	}
+#endif
+
 void atag_parse(void) {
 	dprintf(INFO, "bootargs: 0x%x 0x%x 0x%x 0x%x\n",
 		lk_boot_args[0],
@@ -607,7 +763,9 @@ void atag_parse(void) {
 	}
 
 	dprintf(INFO, "cmdline=[%s]\n", command_line);
+#ifndef PLATFORM_MSM7X27A
 	dprintf(INFO, "[orig] platform_id=%d variant_id=%d soc_rev=%X\n", board_platform_id(), board_hardware_id(), board_soc_version());
+#endif
 
 	// add to global cmdline lib
 	cmdline_addall(command_line, true);

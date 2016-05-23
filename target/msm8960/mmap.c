@@ -34,12 +34,9 @@
 #include <smem.h>
 #include <board.h>
 #include <baseband.h>
-
-#define MB (1024u * 1024u)
+#include <platform.h>
 
 #define PHYS_MEM_ADDR 0x80000000
-
-typedef void* (*platform_mmap_cb_t)(void* pdata, paddr_t addr, size_t size, bool reserved);
 
 typedef struct {
 	size_t size;

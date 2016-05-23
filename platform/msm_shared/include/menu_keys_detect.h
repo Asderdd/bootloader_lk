@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -45,12 +45,6 @@ enum keys_option {
 	POWER_KEY,
 };
 
-enum pages_type {
-	UNLOCK_PAGE = 0,
-	BOOT_VERIFY_PAGE1,
-	BOOT_VERIFY_PAGE2,
-};
-
 int select_msg_keys_detect(void *param);
-void keys_detect_init();
+void keys_detect_init(void);
 #endif				/* __PLATFORM_MSM_SHARED_KEYS_DETECT_H */

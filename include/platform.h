@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2008 Travis Geiselbrecht
  *
- * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -26,6 +26,8 @@
 #define __PLATFORM_H
 
 #include <dload_util.h>
+
+typedef void* (*platform_mmap_cb_t)(void* pdata, paddr_t addr, size_t size, bool reserved);
 
 #define PA(x) platform_get_virt_to_phys_mapping(x)
 #define VA(x) platform_get_phys_to_virt_mapping(x)
@@ -59,14 +61,18 @@ uint32_t check_alarm_boot(void);
 void platform_uninit_timer(void);
 void reboot_device(unsigned);
 int set_download_mode(enum dload_mode mode);
-uint32_t platform_get_smem_base_addr();
+uint32_t platform_get_smem_base_addr(void);
 uint32_t platform_get_sclk_count(void);
 void clock_config_cdc(uint32_t interface);
-int platform_is_msm8939();
-int platform_is_msm8909();
-int platform_is_msm8992();
+int platform_is_msm8939(void);
+int platform_is_msm8909(void);
+int platform_is_msm8992(void);
 int boot_device_mask(int);
-uint32_t platform_detect_panel();
-uint32_t platform_get_max_periph();
-void set_oem_unlock();
+uint32_t platform_detect_panel(void);
+uint32_t platform_get_max_periph(void);
+void set_device_unlock_value(int type, bool status);
+void get_product_name(unsigned char *buf);
+void get_bootloader_version(unsigned char *buf);
+void get_baseband_version(unsigned char *buf);
+bool is_device_locked(void);
 #endif

@@ -485,7 +485,7 @@ static struct udc_endpoint *ep0in, *ep0out;
 static struct udc_request *ep0req;
 
 static void
-ep0_setup_ack_complete()
+ep0_setup_ack_complete(struct udc_request *req, unsigned actual, int status)
 {
 	uint32_t mode;
 
@@ -964,6 +964,21 @@ int udc_stop(void)
 	writel(USBCMD_RESET, USB_USBCMD);
 	/* Wait until reset completes. */
 	while(readl(USB_USBCMD) & USBCMD_RESET);
+
+	// reset all global variables
+	desc_list = 0;
+	next_string_id = 1;
+	ept_alloc_table = EPT_TX(0) | EPT_RX(0);
+	ep0in = NULL;
+	ep0out = NULL;
+	ep0req = NULL;
+	ept_list = 0;
+	epts = 0;
+	usb_online = 0;
+	usb_highspeed = 0;
+	the_gadget = NULL;
+	the_device = NULL;
+	test_mode = 0;
 
 	return 0;
 }
